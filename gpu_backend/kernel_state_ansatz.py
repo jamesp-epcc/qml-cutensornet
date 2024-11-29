@@ -103,7 +103,21 @@ class KernelStateAnsatz:
         return the_circuit
 
 
-def build_kernel_matrix(mpi_comm, ansatz: KernelStateAnsatz, X, Y=None, info_file=None, truncation_error=None, loglevel=30) -> np.ndarray:
+# saves a list of matrix product states to a file, in text format
+def save_mps_array(filename, mps_array):
+    f = open(filename, 'w')
+    # write a header giving the number of MPSs and number of tensors per MPS
+    f.write(f'{len(mps_array)} {len(mps_array[0].tensors)}\n')
+    for mps in mps_array:
+        if mps is not None:
+            for t in mps.tensors:
+                f.write(str(t) + '\n')
+        else:
+            f.write('None\n')
+    f.close()
+
+
+def build_kernel_matrix(mpi_comm, ansatz: KernelStateAnsatz, X, Y=None, info_file=None, truncation_error=None, name='train', save_mps=False, loglevel=30) -> np.ndarray:
     """Use MPI to parallelise the calculation of entries of the kernel matrix.
 
     Notes:
@@ -124,6 +138,9 @@ def build_kernel_matrix(mpi_comm, ansatz: KernelStateAnsatz, X, Y=None, info_fil
         info_file: The name of the file where to save performance information of this call.
             If not provided, the performance information will only appear in stdout.
         truncation_error: Truncation error for SVD.
+        name: string added to filenames when saving MPS
+        save_mps: if True, will compute all the MPSs and save them to text files,
+            then return. Defaults to False.
         loglevel: Set to 10 for debug mode. Defaults to 30 (quiet).
 
     Returns:
@@ -321,6 +338,12 @@ def build_kernel_matrix(mpi_comm, ansatz: KernelStateAnsatz, X, Y=None, info_fil
         sys.stdout.flush()
         tiling_start_time = MPI.Wtime()
 
+    if save_mps:
+        # Save all MPSs to files and return without computing matrix
+        save_mps_array(f'mps_x_{name}_{rank}.txt', mps_x_chunk)
+        save_mps_array(f'mps_y_{name}_{rank}.txt', mps_y_chunk)
+        return None
+        
     # Allocate space for kernel matrix
     len_Y = len(Y) if Y is not None else len(X)
     kernel_mat = np.zeros(shape=(len_Y, len(X)))

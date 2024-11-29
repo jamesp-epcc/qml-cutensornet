@@ -65,6 +65,9 @@ def draw_sample(df, ndmin, ndmaj, test_frac=0.2, seed=123):
 
     return np.array(train_df), np.array(train_labels,dtype='int'), np.array(test_df), np.array(test_labels,dtype='int')
 
+# use maximum precision and no truncation when saving data for C++
+np.set_printoptions(precision=20, threshold=sys.maxsize)
+
 ##############
 # Parameters #
 ##############
@@ -174,6 +177,11 @@ if rank == root:
     print(f"Built kernel matrix on training set. Time: {round(time1-time0,2)} seconds\n")
     np.save(f"kernels/{train_info}.npy", kernel_train)
 
+    # write matrix to text file
+    f = open('kernel_matrix_train.txt', 'w')
+    f.write(str(kernel_train))
+    f.close()
+
 time0 = MPI.Wtime()
 kernel_test = build_kernel_matrix(
     mpi_comm,
@@ -181,13 +189,18 @@ kernel_test = build_kernel_matrix(
     X=reduced_train_features,
     Y=reduced_test_features,
     info_file=test_info,
-    truncation_error=truncation_error,
+    truncation_error=truncation_error
 )
 time1 = MPI.Wtime()
 if rank == root:
     print(f"Built kernel matrix on test set. Time: {round(time1-time0,2)} seconds\n")
     np.save(f"kernels/{test_info}.npy", kernel_test)
     print('Test Kernel\n',kernel_test)
+
+    # write matrix to text file
+    f = open('kernel_matrix_test.txt', 'w')
+    f.write(str(kernel_test))
+    f.close()
 
 #############################
 # Testing the kernel matrix #
