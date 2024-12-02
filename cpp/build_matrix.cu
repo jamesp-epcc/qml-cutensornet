@@ -118,6 +118,8 @@ int main(int argc, char* argv[])
 	mps_y.push_back(mps);
     }
 
+    std::cout << "Loaded Y MPS" << std::endl;
+    
     // load conjugate of X MPSs
     for (int i = 0; i < num_mps_x; i++) {
 	MatrixProductState* mps = new MatrixProductState(num_qubit_x, 12, 1.0 - truncation_error);
@@ -132,6 +134,8 @@ int main(int argc, char* argv[])
     delete[] mps_x_str;
     delete[] mps_y_str;
 
+    std::cout << "Loaded X MPS, computing matrix..." << std::endl;
+    
     // allocate storage for matrix
     double* matrix = new double[num_mps_x * num_mps_y];
 
@@ -139,6 +143,7 @@ int main(int argc, char* argv[])
     VdotCalculator vdc(CUDA_C_64F, CUTENSORNET_COMPUTE_64F);
     // FIXME: get ordering correct here
     for (int i = 0; i < num_mps_x; i++) {
+	std::cout << "Row " << i << std::endl;
 	for (int j = 0; j < num_mps_y; j++) {
 	    complex_t overlap = vdc.vdot(*mps_x[i], *mps_y[j]);
 	    double kernel_entry = (overlap * std::conj(overlap)).real();
@@ -147,7 +152,8 @@ int main(int argc, char* argv[])
     }
 
     // write matrix to disk
-    ofstream of(argv[3]);
+    std::cout << "Writing matrix to output file" << std::endl;
+    std::ofstream of(argv[3]);
     if (!of.good()) {
 	std::cerr << "Error opening output file" << std::endl;
 	return 1;

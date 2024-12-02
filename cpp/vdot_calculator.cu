@@ -192,10 +192,10 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
 
     // perform actual contraction
     std::vector<void*> rawDataIn;
-    for (int i = 0; i < numQubits_; i++) {
+    for (int i = 0; i < mps1.numQubits_; i++) {
 	rawDataIn.push_back(mps1.qubitTensor_[i]);
     }
-    for (int i = 0; i < numQubits_; i++) {
+    for (int i = 0; i < mps2.numQubits_; i++) {
 	rawDataIn.push_back(mps2.qubitTensor_[i]);
     }
     
@@ -205,7 +205,7 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
 
     // copy back result
     complex_t result;
-    HANDLE_CUDA_ERROR(cudaMemcpy(&result, resultGPU1_, sizeof(complex_t),
+    HANDLE_CUDA_ERROR(cudaMemcpy(&result, resultGPU_, sizeof(complex_t),
 				 cudaMemcpyDeviceToHost));
     
     // free resources

@@ -1,6 +1,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #include "mps.h"
@@ -67,7 +68,7 @@ MatrixProductState::~MatrixProductState()
 }
 
 // returns pointer to next character after this tensor, or nullptr on error
-const char* MatrixProductState::loadFromString(const char* str, bool conj)
+char* MatrixProductState::loadFromString(char* str, bool conj)
 {
     // parse out each tensor in turn
     // first pass, work out the sizes
@@ -149,7 +150,7 @@ const char* MatrixProductState::loadFromString(const char* str, bool conj)
 	    }
 	    else {
 		std::cerr << "Unexpected character " << str[p] << std::endl;
-		return nullptr
+		return nullptr;
 	    }
 	} while (depth > 0);
 

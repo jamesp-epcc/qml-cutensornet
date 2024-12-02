@@ -14,13 +14,14 @@
 typedef std::complex<double> complex_t;
 
 class MatrixProductState {
+    friend class VdotCalculator;
  public:
     MatrixProductState(int32_t numQubits, int64_t maxVirtualExtent,
 		       double truncationFidelity=1.0);
     ~MatrixProductState();
 
     
-    const char* loadFromString(const char* str, bool conj=false);
+    char* loadFromString(char* str, bool conj=false);
 
     void printTensors();
 
