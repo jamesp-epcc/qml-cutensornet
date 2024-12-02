@@ -167,7 +167,9 @@ int main(int argc, char* argv[])
 	    of << matrix[(j * num_mps_x) + i];
 	    if (j < (num_mps_y - 1)) of << ", ";
 	}
-	of << " ]" << std::endl;
+	of << " ]";
+	if (i < (num_mps_x - 1)) of << ",";
+	of << std::endl;
     }
     of << " ]" << std::endl;
     of.close();
