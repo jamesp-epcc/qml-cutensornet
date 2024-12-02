@@ -48,6 +48,17 @@ static char* readInt(char* str, int& result)
     return str + p;
 }
 
+// returns true if the next item in the string is 'None'
+static bool isNone(char* str)
+{
+    int p = 0;
+    // skip whitespace
+    while ((str[p]) && (std::isspace(str[p]))) p++;
+    if ((str[p] == 0) || (str[p+1] == 0) || (str[p+2] == 0) || (str[p+3] == 0) ||
+	(str[p] != 'N') || (str[p+1] != 'o') || (str[p+2] != 'n') || (str[p+3] != 'e')) return false;
+    return true;
+}
+
 int main(int argc, char* argv[])
 {
     double truncation_error = 1e-16;
@@ -96,7 +107,7 @@ int main(int argc, char* argv[])
     }    
     
     // check that they match
-    if ((num_mps_x != num_mps_y) || (num_qubit_x != num_qubit_y)) {
+    if (num_qubit_x != num_qubit_y) {
 	std::cerr << "Dimension mismatch between MPS X and MPS Y" << std::endl;
 	return 1;
     }
@@ -109,6 +120,11 @@ int main(int argc, char* argv[])
     
     // load Y first in case there are 'None' items
     for (int i = 0; i < num_mps_y; i++) {
+	if (isNone(mps_y_ptr)) {
+	    std::cout << "Found 'None' in mps Y input, adjusting count to " << i << std::endl;
+	    num_mps_y = i;
+	    break;
+	}
 	MatrixProductState* mps = new MatrixProductState(num_qubit_y, 12, 1.0 - truncation_error);
 	mps_y_ptr = mps->loadFromString(mps_y_ptr, false);
 	if (mps_y_ptr == nullptr) {
@@ -141,13 +157,12 @@ int main(int argc, char* argv[])
 
     // compute matrix
     VdotCalculator vdc(CUDA_C_64F, CUTENSORNET_COMPUTE_64F);
-    // FIXME: get ordering correct here
-    for (int i = 0; i < num_mps_x; i++) {
+    for (int i = 0; i < num_mps_y; i++) {
 	std::cout << "Row " << i << std::endl;
-	for (int j = 0; j < num_mps_y; j++) {
-	    complex_t overlap = vdc.vdot(*mps_x[i], *mps_y[j]);
+	for (int j = 0; j < num_mps_x; j++) {
+	    complex_t overlap = vdc.vdot(*mps_x[j], *mps_y[i]);
 	    double kernel_entry = (overlap * std::conj(overlap)).real();
-	    matrix[(j * num_mps_x) + i] = kernel_entry;
+	    matrix[(j * num_mps_y) + i] = kernel_entry;
 	}
     }
 
@@ -160,15 +175,14 @@ int main(int argc, char* argv[])
     }
     of << std::setprecision(20);
     of << "[ ";
-    // FIXME: get ordering correct here
-    for (int i = 0; i < num_mps_x; i++) {
+    for (int i = 0; i < num_mps_y; i++) {
 	of << "[ ";
-	for (int j = 0; j < num_mps_y; j++) {
-	    of << matrix[(j * num_mps_x) + i];
-	    if (j < (num_mps_y - 1)) of << ", ";
+	for (int j = 0; j < num_mps_x; j++) {
+	    of << matrix[(j * num_mps_y) + i];
+	    if (j < (num_mps_x - 1)) of << ", ";
 	}
 	of << " ]";
-	if (i < (num_mps_x - 1)) of << ",";
+	if (i < (num_mps_y - 1)) of << ",";
 	of << std::endl;
     }
     of << " ]" << std::endl;
