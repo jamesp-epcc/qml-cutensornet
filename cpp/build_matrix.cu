@@ -102,7 +102,10 @@ int main(int argc, char* argv[])
 	numThreads = omp_get_num_threads();
     }
 #endif
-    std::cout << "Running with " << numThreads << " threads" << std::endl;
+    int numGPUs;
+    HANDLE_CUDA_ERROR(cudaGetDeviceCount(&numGPUs));
+    
+    std::cout << "Running with " << numThreads << " threads and " << numGPUs << " GPUs" << std::endl;
     
     double truncation_error = 1e-16;
     
@@ -204,6 +207,7 @@ int main(int argc, char* argv[])
     // instantiate a VdotCalculator for each thread
     std::vector<VdotCalculator*> vdcs;
     for (int i = 0; i < numThreads; i++) {
+	//HANDLE_CUDA_ERROR(cudaSetDevice(i % numGPUs));
 	vdcs.push_back(new VdotCalculator(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2));
     }
 
@@ -217,6 +221,9 @@ int main(int argc, char* argv[])
 #ifdef _OPENMP
 	t = omp_get_thread_num();
 #endif
+	// FIXME: before we can use multiple devices, we need multiple output
+	// buffers
+	//HANDLE_CUDA_ERROR(cudaSetDevice(t % numGPUs));
 	if (t == 0) std::cout << "Row " << i << std::endl;
 	for (int j = 0; j < num_mps_x; j++) {
 	    vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
