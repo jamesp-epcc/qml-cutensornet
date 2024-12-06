@@ -1,8 +1,8 @@
 CUQUANTUM_ROOT=/work/ic081/ic081/jamesp-ic081/fraud/venv_cuquantum/lib/python3.11/site-packages/cuquantum
 CUTENSOR_ROOT=/work/ic081/ic081/jamesp-ic081/fraud/venv_cuquantum/lib/python3.11/site-packages/cutensor
 
-CFLAGS=-I${CUQUANTUM_ROOT}/include -I${CUTENSOR_ROOT}/include
-LDFLAGS=-L${CUQUANTUM_ROOT}/lib -L${CUTENSOR_ROOT}/lib -lcutensornet -lcutensor
+CFLAGS=-I${CUQUANTUM_ROOT}/include -I${CUTENSOR_ROOT}/include -Xcompiler -fopenmp
+LDFLAGS=-L${CUQUANTUM_ROOT}/lib -L${CUTENSOR_ROOT}/lib -lcutensornet -lcutensor -lgomp
 
 OBJS=build_matrix.o mps.o vdot_calculator.o
 

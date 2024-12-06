@@ -14,6 +14,10 @@
 
 #include <cuda_runtime.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #define HANDLE_CUDA_ERROR(x)                           \
 {                                                      \
     const auto err = x;                                \
@@ -91,6 +95,15 @@ static bool isNone(char* str)
 
 int main(int argc, char* argv[])
 {
+    int numThreads = 1;
+#ifdef _OPENMP
+#pragma omp parallel
+    {
+	numThreads = omp_get_num_threads();
+    }
+#endif
+    std::cout << "Running with " << numThreads << " threads" << std::endl;
+    
     double truncation_error = 1e-16;
     
     if (argc != 4) {
@@ -180,7 +193,7 @@ int main(int argc, char* argv[])
     delete[] mps_x_str;
     delete[] mps_y_str;
 
-    std::cout << "Loaded X MPS, computing matrix..." << std::endl;
+    std::cout << "Allocating resources" << std::endl;
     
     // allocate storage for matrix
     complex_t* gpuMatrix;
@@ -188,15 +201,25 @@ int main(int argc, char* argv[])
     complex_t* complexMatrix = new complex_t[num_mps_x * num_mps_y];
     double* matrix = new double[num_mps_x * num_mps_y];
 
-    // compute matrix
-    VdotCalculator vdc(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2);
+    // instantiate a VdotCalculator for each thread
+    std::vector<VdotCalculator*> vdcs;
+    for (int i = 0; i < numThreads; i++) {
+	vdcs.push_back(new VdotCalculator(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2));
+    }
 
+    // compute matrix
+    std::cout << "Computing matrix..." << std::endl;
     double t1 = getTime();
-    
+
+#pragma omp parallel for
     for (int i = 0; i < num_mps_y; i++) {
-	std::cout << "Row " << i << std::endl;
+	int t = 0;
+#ifdef _OPENMP
+	t = omp_get_thread_num();
+#endif
+	if (t == 0) std::cout << "Row " << i << std::endl;
 	for (int j = 0; j < num_mps_x; j++) {
-	    vdc.vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
+	    vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
 	}
     }
 
@@ -246,5 +269,9 @@ int main(int argc, char* argv[])
 	delete mps_y[i];
     }
 
+    for (int i = 0; i < vdcs.size(); i++) {
+	delete vdcs[i];
+    }
+    
     return 0;
 }
