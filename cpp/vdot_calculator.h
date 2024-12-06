@@ -8,7 +8,8 @@
 
 class VdotCalculator {
  public:
-    VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t typeCompute);
+    VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t typeCompute,
+		   int numQubits, int physExtent);
     ~VdotCalculator();
 
     complex_t vdot(MatrixProductState& mps1, MatrixProductState& mps2);
@@ -17,6 +18,9 @@ class VdotCalculator {
     cudaDataType_t typeData_;
     cutensornetComputeType_t typeCompute_;
 
+    int numQubits_;
+    int physExtent_;
+    
     cutensornetHandle_t handle_;
     cudaStream_t stream_;
 

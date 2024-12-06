@@ -21,10 +21,12 @@
     }                                                  \
 };
 
-VdotCalculator::VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t typeCompute)
+VdotCalculator::VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t typeCompute, int numQubits, int physExtent)
 {
     typeData_ = typeData;
     typeCompute_ = typeCompute;
+    numQubits_ = numQubits;
+    physExtent_ = physExtent;
 
     // create handle
     HANDLE_ERROR(cutensornetCreate(&handle_));
@@ -62,8 +64,10 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
     // FIXME: promote a lot of the locals here to class members so they don't
     // have to be allocated each time
     // sanity check
-    if ((mps1.numQubits_ != mps2.numQubits_) ||
-	(mps1.physExtent_ != mps2.physExtent_)) {
+    if ((mps1.numQubits_ != numQubits_) ||
+	(mps2.numQubits_ != numQubits_) ||
+	(mps1.physExtent_ != physExtent_) ||
+	(mps2.physExtent_ != physExtent_)) {
 	std::cerr << "For vdot, both MPS must have same number of qubits and physical extent!" << std::endl;
 	return complex_t(0.0, 0.0);
     }
@@ -146,35 +150,7 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
     HANDLE_ERROR( cutensornetCreateContractionOptimizerConfig(handle_, &optimizerConfig) );
     cutensornetContractionOptimizerInfo_t optimizerInfo;
     HANDLE_ERROR( cutensornetCreateContractionOptimizerInfo(handle_, descNet, &optimizerInfo) );
-
-    // define contraction path explicitly
-    cutensornetContractionPath_t path;
-    path.numContractions = (mps1.numQubits_ * 2) - 1;
-    path.data = new cutensornetNodePair_t[path.numContractions];
-    int endMPS1 = mps1.numQubits_ - 1;
-    int endMPS2 = mps1.numQubits_ + mps2.numQubits_ - 1;
-    path.data[0].first = endMPS1; // contract rightmost ends of MPS1 and MPS2
-    path.data[0].second = endMPS2;
-    int k = 1;
-    for (int i = 0; i < (mps1.numQubits_ - 1); i++) {
-	endMPS1 -= 1; // one tensor removed from MPS1
-	endMPS2 -= 2; // one tensor removed from MPS1 and another from MPS2
-
-	// contract result of last iteration with end of MPS2
-	path.data[k].first = endMPS2;
-	path.data[k].second = endMPS2 + 1;
-	k++;
-
-	// contract intermediate result with end of MPS1
-	path.data[k].first = endMPS1;
-	path.data[k].second = endMPS2;
-	k++;
-    }
-    HANDLE_ERROR( cutensornetContractionOptimizerInfoSetAttribute(handle_,
-								  optimizerInfo,
-								  CUTENSORNET_CONTRACTION_OPTIMIZER_INFO_PATH,
-								  &path,
-								  sizeof(path)) );
+    // leave contraction path implicit, unlike in Pytket. It's slightly faster
     
     HANDLE_ERROR( cutensornetContractionOptimize(handle_, descNet, optimizerConfig,
 						 workspaceSize_, optimizerInfo) );
@@ -209,7 +185,7 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
 				 cudaMemcpyDeviceToHost));
     
     // free resources
-    delete[] path.data;
+    //delete[] path.data;
     for (int i = 0; i < (mps1.numQubits_ * 2); i++) {
 	delete[] extentsIn[i];
 	delete[] modesIn[i];

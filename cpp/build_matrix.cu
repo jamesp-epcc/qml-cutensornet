@@ -10,6 +10,25 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <sys/time.h>
+
+// gets the current time in seconds to a high resolution
+static double getTime()
+{
+    const double micro = 1.0e-06;
+    double wall_time;
+    struct timeval tp;
+    
+    if (gettimeofday( &tp, NULL) == -1) {
+    	wall_time = -1.0e0;
+    }
+    else {
+	wall_time = (double) (tp.tv_sec + micro*tp.tv_usec);
+    }
+
+    return wall_time;
+}
+
 // loads the contents of a text file into a memory buffer (null-terminated)
 // returns null on error
 static char* loadFile(const char* filename)
@@ -156,7 +175,10 @@ int main(int argc, char* argv[])
     double* matrix = new double[num_mps_x * num_mps_y];
 
     // compute matrix
-    VdotCalculator vdc(CUDA_C_64F, CUTENSORNET_COMPUTE_64F);
+    VdotCalculator vdc(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2);
+
+    double t1 = getTime();
+    
     for (int i = 0; i < num_mps_y; i++) {
 	std::cout << "Row " << i << std::endl;
 	for (int j = 0; j < num_mps_x; j++) {
@@ -165,6 +187,9 @@ int main(int argc, char* argv[])
 	    matrix[(j * num_mps_y) + i] = kernel_entry;
 	}
     }
+
+    double t2 = getTime();
+    std::cout << "Matrix computation took " << (t2 - t1) << "s" << std::endl;
 
     // write matrix to disk
     std::cout << "Writing matrix to output file" << std::endl;
