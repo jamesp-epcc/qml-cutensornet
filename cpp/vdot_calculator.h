@@ -12,7 +12,7 @@ class VdotCalculator {
 		   int numQubits, int physExtent);
     ~VdotCalculator();
 
-    complex_t vdot(MatrixProductState& mps1, MatrixProductState& mps2);
+    void vdot(MatrixProductState& mps1, MatrixProductState& mps2, complex_t* result);
     
  private:
     cudaDataType_t typeData_;
@@ -20,6 +20,16 @@ class VdotCalculator {
 
     int numQubits_;
     int physExtent_;
+
+    std::vector<int32_t> numModesIn_;
+    std::vector<int64_t*> extentsIn_;
+    std::vector<int64_t*> stridesIn_;
+    std::vector<int32_t*> modesIn_;
+
+    int64_t extentsOut_[1];
+    int32_t modesOut_[1];
+
+    std::vector<void*> rawDataIn_;
     
     cutensornetHandle_t handle_;
     cudaStream_t stream_;
@@ -28,7 +38,7 @@ class VdotCalculator {
     cutensornetWorkspaceDescriptor_t workDesc_;
     void* workspace_;
 
-    void* resultGPU_;
+    cutensornetContractionOptimizerConfig_t optimizerConfig_;
 };
 
 #endif

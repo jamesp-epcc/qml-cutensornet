@@ -12,6 +12,17 @@
 
 #include <sys/time.h>
 
+#include <cuda_runtime.h>
+
+#define HANDLE_CUDA_ERROR(x)                           \
+{                                                      \
+    const auto err = x;                                \
+    if (err != cudaSuccess) {                          \
+	std::cout << "Error: " << cudaGetErrorString(err) << " in line " << __LINE__ << std::endl; \
+	std::exit(1);                                  \
+    }                                                  \
+};
+
 // gets the current time in seconds to a high resolution
 static double getTime()
 {
@@ -172,6 +183,9 @@ int main(int argc, char* argv[])
     std::cout << "Loaded X MPS, computing matrix..." << std::endl;
     
     // allocate storage for matrix
+    complex_t* gpuMatrix;
+    HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, num_mps_x * num_mps_y * sizeof(complex_t)));
+    complex_t* complexMatrix = new complex_t[num_mps_x * num_mps_y];
     double* matrix = new double[num_mps_x * num_mps_y];
 
     // compute matrix
@@ -182,15 +196,22 @@ int main(int argc, char* argv[])
     for (int i = 0; i < num_mps_y; i++) {
 	std::cout << "Row " << i << std::endl;
 	for (int j = 0; j < num_mps_x; j++) {
-	    complex_t overlap = vdc.vdot(*mps_x[j], *mps_y[i]);
-	    double kernel_entry = (overlap * std::conj(overlap)).real();
-	    matrix[(j * num_mps_y) + i] = kernel_entry;
+	    vdc.vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
 	}
     }
 
     double t2 = getTime();
     std::cout << "Matrix computation took " << (t2 - t1) << "s" << std::endl;
 
+    // copy and convert matrix
+    HANDLE_CUDA_ERROR(cudaMemcpy(complexMatrix, gpuMatrix, num_mps_x * num_mps_y * sizeof(complex_t), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < (num_mps_x * num_mps_y); i++) {
+	complex_t overlap = complexMatrix[i];
+	matrix[i] = (overlap * std::conj(overlap)).real();
+    }
+    double t3 = getTime();
+    std::cout << "Matrix copying and conversion took " << (t3 - t2) << "s" << std::endl;
+    
     // write matrix to disk
     std::cout << "Writing matrix to output file" << std::endl;
     std::ofstream of(argv[3]);
@@ -215,12 +236,15 @@ int main(int argc, char* argv[])
 
     // free resources
     delete[] matrix;
+    delete[] complexMatrix;
+    cudaFree(gpuMatrix);
+		      
     for (int i = 0; i < mps_x.size(); i++) {
 	delete mps_x[i];
     }
     for (int i = 0; i < mps_y.size(); i++) {
 	delete mps_y[i];
     }
-    
+
     return 0;
 }

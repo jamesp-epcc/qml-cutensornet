@@ -47,19 +47,72 @@ VdotCalculator::VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t
 					       workspace_,
 					       workspaceSize_));
 
-    HANDLE_CUDA_ERROR(cudaMalloc(&resultGPU_, sizeof(complex_t)));
+    // create optimiser config
+    HANDLE_ERROR( cutensornetCreateContractionOptimizerConfig(handle_, &optimizerConfig_) );
+
+    // initialise the size/mode/stride arrays
+    extentsOut_[0] = 1;
+    modesOut_[0] = 1;
+
+    int pmodeBase = 2;
+    int vmode1Base = pmodeBase + numQubits_;
+    int vmode2Base = vmode1Base + numQubits_ + 1;
+    
+    // mps1
+    for (int i = 0; i < numQubits_; i++) {
+	rawDataIn_.push_back(nullptr);
+
+	numModesIn_.push_back(4);
+
+	// extents and strides depend on the individual MPS's dimensions
+	// so just allocate space now
+	extentsIn_.push_back(new int64_t[4]);
+	stridesIn_.push_back(new int64_t[4]);
+
+	int32_t* modes = new int32_t[4];
+	modes[0] = vmode1Base + i;
+	modes[1] = vmode1Base + i + 1;
+	modes[2] = pmodeBase + i;
+	modes[3] = modesOut_[0];
+	modesIn_.push_back(modes);
+    }
+
+    // mps2
+    for (int i = 0; i < numQubits_; i++) {
+	rawDataIn_.push_back(nullptr);
+
+	numModesIn_.push_back(4);
+
+	// extents and strides depend on the individual MPS's dimensions
+	// so just allocate space now
+	extentsIn_.push_back(new int64_t[4]);
+	stridesIn_.push_back(new int64_t[4]);
+
+	int32_t* modes = new int32_t[4];
+	modes[0] = vmode2Base + i;
+	modes[1] = vmode2Base + i + 1;
+	modes[2] = pmodeBase + i;
+	modes[3] = modesOut_[0];
+	modesIn_.push_back(modes);
+    }
 }
 
 VdotCalculator::~VdotCalculator()
 {
+    for (int i = 0; i < (numQubits_ * 2); i++) {
+	delete[] extentsIn_[i];
+	delete[] modesIn_[i];
+	delete[] stridesIn_[i];
+    }
+
+    cutensornetDestroyContractionOptimizerConfig(optimizerConfig_);
     cutensornetDestroyWorkspaceDescriptor(workDesc_);
     cutensornetDestroy(handle_);
 
     cudaFree(workspace_);
-    cudaFree(resultGPU_);
 }
 
-complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps2)
+void VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps2, complex_t* result)
 {
     // FIXME: promote a lot of the locals here to class members so they don't
     // have to be allocated each time
@@ -69,90 +122,56 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
 	(mps1.physExtent_ != physExtent_) ||
 	(mps2.physExtent_ != physExtent_)) {
 	std::cerr << "For vdot, both MPS must have same number of qubits and physical extent!" << std::endl;
-	return complex_t(0.0, 0.0);
+	return;
     }
 
-    std::vector<int32_t> numModesIn;
-    std::vector<int64_t*> extentsIn;
-    std::vector<int64_t*> stridesIn;
-    std::vector<int32_t*> modesIn;
-
-    int64_t extentsOut[1] = { 1 };
-    int32_t modesOut[1]; // = { nextMode_; };
-    int numModesOut = 1;
-    modesOut[0] = 1;
-    
     // mps1 tensors
-    for (int i = 0; i < mps1.numQubits_; i++) {
-	numModesIn.push_back(4);
-	
-	int64_t* extents = new int64_t[4];
+    for (int i = 0; i < numQubits_; i++) {
+	int64_t* extents = extentsIn_[i];
 	extents[0] = mps1.extentsPerQubit_[i];
 	extents[1] = mps1.extentsPerQubit_[i+1];
 	extents[2] = mps1.physExtent_;
 	extents[3] = 1;
-	extentsIn.push_back(extents);
 
-	int64_t* strides = new int64_t[4];
+	int64_t* strides = stridesIn_[i];
 	strides[3] = 1;
 	strides[2] = 1;
 	strides[1] = extents[2] * strides[2];
 	strides[0] = extents[1] * strides[1];
-	stridesIn.push_back(strides);
-
-	int32_t* modes = new int32_t[4];
-	modes[0] = mps1.virtualModes_[i];
-	modes[1] = mps1.virtualModes_[i+1];
-	modes[2] = mps1.physModes_[i];
-	modes[3] = modesOut[0];
-	modesIn.push_back(modes);
     }
 
     // mps 2 tensors
-    for (int i = 0; i < mps2.numQubits_; i++) {
-	numModesIn.push_back(4);
-
-	int64_t* extents = new int64_t[4];
+    for (int i = 0; i < numQubits_; i++) {
+	int64_t* extents = extentsIn_[numQubits_ + i];
 	extents[0] = mps2.extentsPerQubit_[i];
 	extents[1] = mps2.extentsPerQubit_[i+1];
 	extents[2] = mps2.physExtent_;
 	extents[3] = 1;
-	extentsIn.push_back(extents);
 
-	int64_t* strides = new int64_t[4];
+	int64_t* strides = stridesIn_[numQubits_ + i];
 	strides[3] = 1;
 	strides[2] = 1;
 	strides[1] = extents[2] * strides[2];
 	strides[0] = extents[1] * strides[1];
-	stridesIn.push_back(strides);
-	
-	int32_t* modes = new int32_t[4];
-	modes[0] = mps2.virtualModes_[i];
-	modes[1] = mps2.virtualModes_[i+1];
-	modes[2] = mps1.physModes_[i]; // same physical modes as mps 1
-	modes[3] = modesOut[0];
-	modesIn.push_back(modes);
     }
     
     cutensornetNetworkDescriptor_t descNet;
-    HANDLE_ERROR(cutensornetCreateNetworkDescriptor(handle_, mps1.numQubits_*2,
-						    numModesIn.data(),
-						    extentsIn.data(),
-						    stridesIn.data(),
-						    modesIn.data(), nullptr,
-						    numModesOut,
-						    extentsOut, nullptr, modesOut,
+    HANDLE_ERROR(cutensornetCreateNetworkDescriptor(handle_, numQubits_*2,
+						    numModesIn_.data(),
+						    extentsIn_.data(),
+						    stridesIn_.data(),
+						    modesIn_.data(), nullptr, 1,
+						    extentsOut_, nullptr, modesOut_,
 						    typeData_, typeCompute_,
 						    &descNet));
 
     // create optimiser info
-    cutensornetContractionOptimizerConfig_t optimizerConfig;
-    HANDLE_ERROR( cutensornetCreateContractionOptimizerConfig(handle_, &optimizerConfig) );
+    // re-use optimiser config, which never changes
     cutensornetContractionOptimizerInfo_t optimizerInfo;
     HANDLE_ERROR( cutensornetCreateContractionOptimizerInfo(handle_, descNet, &optimizerInfo) );
     // leave contraction path implicit, unlike in Pytket. It's slightly faster
     
-    HANDLE_ERROR( cutensornetContractionOptimize(handle_, descNet, optimizerConfig,
+    HANDLE_ERROR( cutensornetContractionOptimize(handle_, descNet, optimizerConfig_,
 						 workspaceSize_, optimizerInfo) );
     int64_t numSlices = 0;
     HANDLE_ERROR( cutensornetContractionOptimizerInfoGetAttribute( handle_, optimizerInfo, CUTENSORNET_CONTRACTION_OPTIMIZER_INFO_NUM_SLICES, &numSlices, sizeof(numSlices)) );
@@ -167,36 +186,19 @@ complex_t VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps
     HANDLE_ERROR( cutensornetCreateSliceGroupFromIDRange(handle_, 0, numSlices, 1, &sliceGroup) );
 
     // perform actual contraction
-    std::vector<void*> rawDataIn;
-    for (int i = 0; i < mps1.numQubits_; i++) {
-	rawDataIn.push_back(mps1.qubitTensor_[i]);
-    }
-    for (int i = 0; i < mps2.numQubits_; i++) {
-	rawDataIn.push_back(mps2.qubitTensor_[i]);
+    for (int i = 0; i < numQubits_; i++) {
+	rawDataIn_[i] = mps1.qubitTensor_[i];
+	rawDataIn_[i + numQubits_] = mps2.qubitTensor_[i];
     }
     
-    HANDLE_ERROR(cutensornetContractSlices(handle_, plan, rawDataIn.data(),
-					   resultGPU_, 0, workDesc_,
+    HANDLE_ERROR(cutensornetContractSlices(handle_, plan, rawDataIn_.data(),
+					   (void*)result, 0, workDesc_,
 					   sliceGroup, stream_));
 
-    // copy back result
-    complex_t result;
-    HANDLE_CUDA_ERROR(cudaMemcpy(&result, resultGPU_, sizeof(complex_t),
-				 cudaMemcpyDeviceToHost));
-    
     // free resources
-    //delete[] path.data;
-    for (int i = 0; i < (mps1.numQubits_ * 2); i++) {
-	delete[] extentsIn[i];
-	delete[] modesIn[i];
-	delete[] stridesIn[i];
-    }
     HANDLE_ERROR(cutensornetDestroySliceGroup(sliceGroup));
     HANDLE_ERROR(cutensornetDestroyContractionPlan(plan));
     HANDLE_ERROR(cutensornetDestroyContractionOptimizerInfo(optimizerInfo));
-    HANDLE_ERROR(cutensornetDestroyContractionOptimizerConfig(optimizerConfig));
     HANDLE_ERROR(cutensornetDestroyNetworkDescriptor(descNet));
-
-    return result;
 }
 
