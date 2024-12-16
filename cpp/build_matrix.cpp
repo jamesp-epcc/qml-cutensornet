@@ -14,6 +14,8 @@
 
 #include <cuda_runtime.h>
 
+#include <mpi.h>
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -95,6 +97,12 @@ static bool isNone(char* str)
 
 int main(int argc, char* argv[])
 {
+    int rank, numProcs;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    std::cout << "This is process " << rank << " of " << numProcs << std::endl; 
+    
     int numThreads = 1;
 #ifdef _OPENMP
 #pragma omp parallel
@@ -111,6 +119,7 @@ int main(int argc, char* argv[])
     
     if (argc != 4) {
 	std::cerr << "Usage: build_matrix <mps X input file> <mps Y input file> <matrix output file>" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
 
@@ -118,12 +127,14 @@ int main(int argc, char* argv[])
     char* mps_x_str = loadFile(argv[1]);
     if (mps_x_str == nullptr) {
 	std::cerr << "Error loading MPS X input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
     
     char* mps_y_str = loadFile(argv[2]);
     if (mps_y_str == nullptr) {
 	std::cerr << "Error loading MPS Y input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
 
@@ -132,11 +143,13 @@ int main(int argc, char* argv[])
     char *mps_x_ptr = readInt(mps_x_str, num_mps_x);
     if (!mps_x_ptr) {
 	std::cerr << "Error parsing header of MPS X input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
     mps_x_ptr = readInt(mps_x_ptr, num_qubit_x);
     if (!mps_x_ptr) {
 	std::cerr << "Error parsing header of MPS X input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
 
@@ -144,17 +157,20 @@ int main(int argc, char* argv[])
     char *mps_y_ptr = readInt(mps_y_str, num_mps_y);
     if (!mps_y_ptr) {
 	std::cerr << "Error parsing header of MPS Y input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
     mps_y_ptr = readInt(mps_y_ptr, num_qubit_y);
     if (!mps_y_ptr) {
 	std::cerr << "Error parsing header of MPS Y input file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }    
     
     // check that they match
     if (num_qubit_x != num_qubit_y) {
 	std::cerr << "Dimension mismatch between MPS X and MPS Y" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
     std::cout << "Loading " << num_mps_x << " MPSs of " << num_qubit_x << " qubits" << std::endl;
@@ -175,6 +191,7 @@ int main(int argc, char* argv[])
 	mps_y_ptr = mps->loadFromString(mps_y_ptr, false);
 	if (mps_y_ptr == nullptr) {
 	    std::cerr << "Error loading MPS " << i << " from MPS Y" << std::endl;
+	    MPI_Finalize();
 	    return 1;
 	}
 	mps_y.push_back(mps);
@@ -188,6 +205,7 @@ int main(int argc, char* argv[])
 	mps_x_ptr = mps->loadFromString(mps_x_ptr, true);
 	if (mps_x_ptr == nullptr) {
 	    std::cerr << "Error loading MPS " << i << " from MPS X" << std::endl;
+	    MPI_Finalize();
 	    return 1;
 	}
 	mps_x.push_back(mps);
@@ -247,6 +265,7 @@ int main(int argc, char* argv[])
     std::ofstream of(argv[3]);
     if (!of.good()) {
 	std::cerr << "Error opening output file" << std::endl;
+	MPI_Finalize();
 	return 1;
     }
     of << std::setprecision(20);
@@ -279,6 +298,7 @@ int main(int argc, char* argv[])
     for (int i = 0; i < vdcs.size(); i++) {
 	delete vdcs[i];
     }
-    
+
+    MPI_Finalize();
     return 0;
 }

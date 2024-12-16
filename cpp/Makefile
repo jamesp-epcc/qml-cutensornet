@@ -9,10 +9,10 @@ LDFLAGS=-L${CUQUANTUM_ROOT}/lib -L${CUTENSOR_ROOT}/lib -lcutensornet -lcutensor 
 OBJS=build_matrix.o mps.o vdot_calculator.o
 
 build_matrix: ${OBJS}
-	g++ -o build_matrix ${OBJS} ${LDFLAGS}
+	mpicxx -o build_matrix ${OBJS} ${LDFLAGS}
 
 build_matrix.o: build_matrix.cpp mps.h vdot_calculator.h
-	g++ -c build_matrix.cpp -o build_matrix.o ${CFLAGS}
+	mpicxx -c build_matrix.cpp -o build_matrix.o ${CFLAGS}
 
 mps.o: mps.cu mps.h
 	nvcc -c mps.cu -o mps.o ${NVCCFLAGS}
