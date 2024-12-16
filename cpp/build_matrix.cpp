@@ -97,7 +97,7 @@ static bool isNone(char* str)
 
 int main(int argc, char* argv[])
 {
-    int rank, numProcs;
+    int rank, numProcs, mpiError;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -224,6 +224,7 @@ int main(int argc, char* argv[])
     // allocate storage for matrix
     complex_t* gpuMatrix;
     HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, num_mps_x * num_mps_y * sizeof(complex_t)));
+    HANDLE_CUDA_ERROR(cudaMemset((void*)gpuMatrix, 0, num_mps_x * num_mps_y * sizeof(complex_t)));
     complex_t* complexMatrix = new complex_t[num_mps_x * num_mps_y];
     double* matrix = new double[num_mps_x * num_mps_y];
 
@@ -264,9 +265,14 @@ int main(int argc, char* argv[])
     }
     double t3 = getTime();
     std::cout << "Matrix copying and conversion took " << (t3 - t2) << "s" << std::endl;
-    
-    // write matrix to disk
+
     if (rank == 0) {
+	double* finalMatrix = new double[num_mps_x * num_mps_y];
+	// reduce matrix across MPI processes
+	MPI_Reduce(matrix, finalMatrix, num_mps_x * num_mps_y,
+		   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+	// write matrix to disk
 	sprintf(filenameBuffer, "%s/matrix_%s.txt", datadir, trainOrTest);
 	std::cout << "Writing matrix to output file" << std::endl;
 	std::ofstream of(filenameBuffer);
@@ -280,7 +286,7 @@ int main(int argc, char* argv[])
 	for (int i = 0; i < num_mps_y; i++) {
 	    of << "[ ";
 	    for (int j = 0; j < num_mps_x; j++) {
-		of << matrix[(j * num_mps_y) + i];
+		of << finalMatrix[(j * num_mps_y) + i];
 		if (j < (num_mps_x - 1)) of << ", ";
 	    }
 	    of << " ]";
@@ -289,6 +295,13 @@ int main(int argc, char* argv[])
 	}
 	of << " ]" << std::endl;
 	of.close();
+
+	delete[] finalMatrix;
+    }
+    else {
+	// reduce matrix across MPI processes
+	MPI_Reduce(matrix, nullptr, num_mps_x * num_mps_y,
+		   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     }
 
     // free resources
