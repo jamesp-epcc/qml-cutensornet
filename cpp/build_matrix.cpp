@@ -117,23 +117,28 @@ int main(int argc, char* argv[])
     
     double truncation_error = 1e-16;
     
-    if (argc != 4) {
-	std::cerr << "Usage: build_matrix <mps X input file> <mps Y input file> <matrix output file>" << std::endl;
+    if ((argc != 3) || ((strcmp(argv[2], "train")) && (strcmp(argv[2], "test")))) {
+	std::cerr << "Usage: build_matrix <data directory> [train|test]" << std::endl;
 	MPI_Finalize();
 	return 1;
     }
-
+    char* datadir = argv[1];
+    char* trainOrTest = argv[2];
+    char filenameBuffer[500];
+    
     // read the input files
-    char* mps_x_str = loadFile(argv[1]);
+    sprintf(filenameBuffer, "%s/mps_x_%s_%d.txt", datadir, trainOrTest, rank);
+    char* mps_x_str = loadFile(filenameBuffer);
     if (mps_x_str == nullptr) {
-	std::cerr << "Error loading MPS X input file" << std::endl;
+	std::cerr << "Error loading MPS X input file " << filenameBuffer << std::endl;
 	MPI_Finalize();
 	return 1;
     }
     
-    char* mps_y_str = loadFile(argv[2]);
+    sprintf(filenameBuffer, "%s/mps_y_%s_%d.txt", datadir, trainOrTest, rank);
+    char* mps_y_str = loadFile(filenameBuffer);
     if (mps_y_str == nullptr) {
-	std::cerr << "Error loading MPS Y input file" << std::endl;
+	std::cerr << "Error loading MPS Y input file " << filenameBuffer << std::endl;
 	MPI_Finalize();
 	return 1;
     }
@@ -261,27 +266,30 @@ int main(int argc, char* argv[])
     std::cout << "Matrix copying and conversion took " << (t3 - t2) << "s" << std::endl;
     
     // write matrix to disk
-    std::cout << "Writing matrix to output file" << std::endl;
-    std::ofstream of(argv[3]);
-    if (!of.good()) {
-	std::cerr << "Error opening output file" << std::endl;
-	MPI_Finalize();
-	return 1;
-    }
-    of << std::setprecision(20);
-    of << "[ ";
-    for (int i = 0; i < num_mps_y; i++) {
-	of << "[ ";
-	for (int j = 0; j < num_mps_x; j++) {
-	    of << matrix[(j * num_mps_y) + i];
-	    if (j < (num_mps_x - 1)) of << ", ";
+    if (rank == 0) {
+	sprintf(filenameBuffer, "%s/matrix_%s.txt", datadir, trainOrTest);
+	std::cout << "Writing matrix to output file" << std::endl;
+	std::ofstream of(filenameBuffer);
+	if (!of.good()) {
+	    std::cerr << "Error opening output file" << filenameBuffer << std::endl;
+	    MPI_Finalize();
+	    return 1;
 	}
-	of << " ]";
-	if (i < (num_mps_y - 1)) of << ",";
-	of << std::endl;
+	of << std::setprecision(20);
+	of << "[ ";
+	for (int i = 0; i < num_mps_y; i++) {
+	    of << "[ ";
+	    for (int j = 0; j < num_mps_x; j++) {
+		of << matrix[(j * num_mps_y) + i];
+		if (j < (num_mps_x - 1)) of << ", ";
+	    }
+	    of << " ]";
+	    if (i < (num_mps_y - 1)) of << ",";
+	    of << std::endl;
+	}
+	of << " ]" << std::endl;
+	of.close();
     }
-    of << " ]" << std::endl;
-    of.close();
 
     // free resources
     delete[] matrix;
