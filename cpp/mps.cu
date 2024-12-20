@@ -177,5 +177,61 @@ void MatrixProductState::printTensors()
     }
 }
 
+int MatrixProductState::getSerialisedSize()
+{
+    int arraySize = numQubits_ + 1; // additional space for holding extents
+    for (int i = 0; i < numQubits_; i++) {
+	arraySize += maxTensorElements_[i];
+    }
+    return arraySize;
+}
+
+void MatrixProductState::serialise(std::vector<complex_t> &vec)
+{
+    // work out size required
+    int arraySize = getSerialisedSize();
+    vec.resize(arraySize);
+
+    // copy in tensor extents
+    int k = 0;
+    for (int i = 0; i < (numQubits_ + 1); i++) {
+	vec[k] = complex_t(extentsPerQubit_[i]);
+	k++;
+    }
+
+    // copy data in from GPU
+    for (int i = 0; i < numQubits_; i++) {
+	HANDLE_CUDA_ERROR(cudaMemcpy(vec.data() + k, qubitTensor_[i],
+				     maxTensorElements_[i] * sizeof(complex_t),
+				     cudaMemcpyDeviceToHost));
+	k += maxTensorElements_[i];
+    }
+}
+
+void MatrixProductState::deserialise(std::vector<complex_t> &vec)
+{
+    // sanity check size
+    int arraySize = getSerialisedSize();
+    if (vec.size() != arraySize) {
+	std::cerr << "Error deserialising MPS: expected " << arraySize << " elements, got " << vec.size() << std::endl;
+	return;
+    }
+
+    // read out extents
+    int k = 0;
+    for (int i = 0; i < (numQubits_ + 1); i++) {
+	extentsPerQubit_[i] = int64_t(vec[k].real());
+	k++;
+    }
+
+    // copy data directly to GPU
+    for (int i = 0; i < numQubits_; i++) {
+	HANDLE_CUDA_ERROR(cudaMemcpy(qubitTensor_[i], vec.data() + k,
+				     maxTensorElements_[i] * sizeof(complex_t),
+				     cudaMemcpyHostToDevice));
+	k += maxTensorElements_[i];
+    }
+}
+
 // mode 1 is used for result of vdot
 int32_t MatrixProductState::nextMode_ = 2;

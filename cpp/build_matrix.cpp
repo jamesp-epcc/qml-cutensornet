@@ -95,6 +95,48 @@ static bool isNone(char* str)
     return true;
 }
 
+static int sendMPS(MatrixProductState& mps, int dest)
+{
+    // FIXME: could allocate one of these per thread instead of reallocating locally
+    // each time. Or store a serialisation buffer with each MPS.
+    std::vector<complex_t> vec;
+    mps.serialise(vec);
+    return MPI_Send(vec.data(), vec.size(), MPI_C_DOUBLE_COMPLEX, dest, 0,
+		    MPI_COMM_WORLD);
+}
+
+static int receiveMPS(MatrixProductState& mps, int source)
+{
+    MPI_Status status;
+    // FIXME: could allocate one of these per thread instead of reallocating locally
+    // each time. Or store a serialisation buffer with each MPS.
+    std::vector<complex_t> vec;
+    vec.resize(mps.getSerialisedSize());
+    int err = MPI_Recv(vec.data(), vec.size(), MPI_C_DOUBLE_COMPLEX, source, 0,
+		       MPI_COMM_WORLD, &status);
+    if (err == MPI_SUCCESS) {
+	mps.deserialise(vec);
+    }
+    return err;
+}
+
+static int sendRecvMPS(MatrixProductState& mps, int dest, int source)
+{
+    MPI_Status status;
+    // FIXME: again, could manage this memory more efficiently
+    std::vector<complex_t> sendVec, recvVec;
+    mps.serialise(sendVec);
+    recvVec.resize(sendVec.size());
+    int err = MPI_Sendrecv(sendVec.data(), sendVec.size(), MPI_C_DOUBLE_COMPLEX,
+			   dest, 0, recvVec.data(), recvVec.size(),
+			   MPI_C_DOUBLE_COMPLEX, source, 0, MPI_COMM_WORLD,
+			   &status);
+    if (err == MPI_SUCCESS) {
+	mps.deserialise(recvVec);
+    }
+    return err;
+}
+
 int main(int argc, char* argv[])
 {
     int rank, numProcs, mpiError;
@@ -235,22 +277,59 @@ int main(int argc, char* argv[])
 	vdcs.push_back(new VdotCalculator(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2));
     }
 
+    // work out sizes and counts
+    int entriesPerChunk = num_mps_x;
+    int xChunks = numProcs;
+    int yChunks = xChunks; // FIXME: handle the case where these are not equal!
+    int numProcsInRR = numProcs - (xChunks % yChunks);
+
+    int iterations = yChunks; // FIXME: handle symmetry optimisation
+    
     // compute matrix
     std::cout << "Computing matrix..." << std::endl;
     double t1 = getTime();
 
+    for (int it = 0; it < iterations; it++) {
+	// fetch MPS for processes that don't fit in round robin
+	for (int procSend = 0; procSend < (xChunks % yChunks); procSend++) {
+	    int procRecv = numProcsInRR + procSend;
+	    if (rank == procSend) {
+		// send all mps_y via MPI
+		for (int i = 0; i < mps_y.size(); i++) {
+		    sendMPS(*mps_y[i], procRecv);
+		}
+	    }
+	    if (rank == procRecv) {
+		// receive all mps_y via MPI
+		for (int i = 0; i < mps_y.size(); i++) {
+		    receiveMPS(*mps_y[i], procSend);
+		}
+	    }
+	}
+	
 #pragma omp parallel for
-    for (int i = 0; i < num_mps_y; i++) {
-	int t = 0;
+	for (int i = 0; i < num_mps_y; i++) {
+	    int t = 0;
 #ifdef _OPENMP
-	t = omp_get_thread_num();
+	    t = omp_get_thread_num();
 #endif
-	// FIXME: before we can use multiple devices, we need multiple output
-	// buffers
-	//HANDLE_CUDA_ERROR(cudaSetDevice(t % numGPUs));
-	if (t == 0) std::cout << "Row " << i << std::endl;
-	for (int j = 0; j < num_mps_x; j++) {
-	    vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
+	    // FIXME: before we can use multiple devices, we need multiple output
+	    // buffers
+	    //HANDLE_CUDA_ERROR(cudaSetDevice(t % numGPUs));
+	    if (t == 0) std::cout << "Row " << i << std::endl;
+	    for (int j = 0; j < num_mps_x; j++) {
+		// FIXME: handle symmetry optimisation
+		vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
+	    }
+	}
+
+	// round robin message passing
+	if (rank < numProcsInRR) {
+	    // send and receive mps_y via MPI
+	    for (int i = 0; i < mps_y.size(); i++) {
+		sendRecvMPS(*mps_y[i], (rank-1) % numProcsInRR,
+			    (rank+1) % numProcsInRR);
+	    }
 	}
     }
 

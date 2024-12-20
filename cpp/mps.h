@@ -25,6 +25,10 @@ class MatrixProductState {
 
     void printTensors();
 
+    int getSerialisedSize();
+    void serialise(std::vector<complex_t> &vec);
+    void deserialise(std::vector<complex_t> &vec);
+    
  private:
     int32_t numQubits_;
     int64_t physExtent_;
