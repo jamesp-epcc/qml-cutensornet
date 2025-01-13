@@ -319,8 +319,9 @@ int main(int argc, char* argv[])
 	    if (t == 0) std::cout << "Row " << i << std::endl;
 	    for (int j = 0; j < num_mps_x; j++) {
 		// FIXME: handle symmetry optimisation
-		// FIXME: check indexing in here!
-		vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(j * num_mps_y) + i]);
+		int x_index = i + entriesPerChunk * rank;
+		int y_index = j + entriesPerChunk * ((rank + it) % yChunks);
+		vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(y_index * num_mps_y) + x_index]);
 	    }
 	}
 
