@@ -1,3 +1,7 @@
+// FIXME: I think matrix dimensions are completely wrong for MPI runs.
+// num_mps_x and num_mps_y correspond to the number of items in the input files,
+// which is the ones the local process has, but they're used for the dimensions of
+// the entire matrix, which should be global!
 #include "mps.h"
 #include "vdot_calculator.h"
 
@@ -95,7 +99,7 @@ static bool isNone(char* str)
     return true;
 }
 
-static int sendMPS(MatrixProductState& mps, int dest)
+static int sendMPS(MatrixProductState& mps, unsigned int dest)
 {
     // FIXME: could allocate one of these per thread instead of reallocating locally
     // each time. Or store a serialisation buffer with each MPS.
@@ -105,7 +109,7 @@ static int sendMPS(MatrixProductState& mps, int dest)
 		    MPI_COMM_WORLD);
 }
 
-static int receiveMPS(MatrixProductState& mps, int source)
+static int receiveMPS(MatrixProductState& mps, unsigned int source)
 {
     MPI_Status status;
     // FIXME: could allocate one of these per thread instead of reallocating locally
@@ -120,7 +124,7 @@ static int receiveMPS(MatrixProductState& mps, int source)
     return err;
 }
 
-static int sendRecvMPS(MatrixProductState& mps, int dest, int source)
+static int sendRecvMPS(MatrixProductState& mps, unsigned int dest, unsigned int source)
 {
     MPI_Status status;
     // FIXME: again, could manage this memory more efficiently
@@ -139,10 +143,11 @@ static int sendRecvMPS(MatrixProductState& mps, int dest, int source)
 
 int main(int argc, char* argv[])
 {
-    int rank, numProcs, mpiError;
+    unsigned int rank, numProcs;
+    int mpiError;
     MPI_Init(&argc, &argv);
-    MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, (int*)&numProcs);
+    MPI_Comm_rank(MPI_COMM_WORLD, (int*)&rank);
     std::cout << "This is process " << rank << " of " << numProcs << std::endl; 
     
     int numThreads = 1;
@@ -278,21 +283,21 @@ int main(int argc, char* argv[])
     }
 
     // work out sizes and counts
-    int entriesPerChunk = num_mps_x;
-    int xChunks = numProcs;
-    int yChunks = xChunks; // FIXME: handle the case where these are not equal!
-    int numProcsInRR = numProcs - (xChunks % yChunks);
+    unsigned int entriesPerChunk = num_mps_x;
+    unsigned int xChunks = numProcs;
+    unsigned int yChunks = xChunks; // FIXME: handle the case where these are not equal!
+    unsigned int numProcsInRR = numProcs - (xChunks % yChunks);
 
-    int iterations = yChunks; // FIXME: handle symmetry optimisation
+    unsigned int iterations = yChunks; // FIXME: handle symmetry optimisation
     
     // compute matrix
     std::cout << "Computing matrix..." << std::endl;
     double t1 = getTime();
 
-    for (int it = 0; it < iterations; it++) {
+    for (unsigned int it = 0; it < iterations; it++) {
 	// fetch MPS for processes that don't fit in round robin
-	for (int procSend = 0; procSend < (xChunks % yChunks); procSend++) {
-	    int procRecv = numProcsInRR + procSend;
+	for (unsigned int procSend = 0; procSend < (xChunks % yChunks); procSend++) {
+	    unsigned int procRecv = numProcsInRR + procSend;
 	    if (rank == procSend) {
 		// send all mps_y via MPI
 		for (int i = 0; i < mps_y.size(); i++) {
@@ -329,8 +334,10 @@ int main(int argc, char* argv[])
 	if (rank < numProcsInRR) {
 	    // send and receive mps_y via MPI
 	    for (int i = 0; i < mps_y.size(); i++) {
-		sendRecvMPS(*mps_y[i], (rank-1) % numProcsInRR,
-			    (rank+1) % numProcsInRR);
+		unsigned int recvfrom = (rank+1) % numProcsInRR;
+		unsigned int sendto = (rank-1) % numProcsInRR;
+		std::cout << "Rank " << rank << " sending to " << sendto << " and receiving from " << recvfrom << std::endl;
+		sendRecvMPS(*mps_y[i], sendto, recvfrom);
 	    }
 	}
     }
