@@ -162,18 +162,18 @@ char* MatrixProductState::loadFromString(char* str, bool conj)
     return str + p;
 }
 
-void MatrixProductState::printTensors()
+void MatrixProductState::printTensors(std::ostream& out)
 {
     for (int i = 0; i < numQubits_; i++) {
 	size_t maxSize = sizeof(complex_t) * maxTensorElements_[i];
 	HANDLE_CUDA_ERROR(cudaMemcpy(qubitTensorHost_[i], qubitTensor_[i],
 				     maxSize, cudaMemcpyDeviceToHost));
 	size_t actualSize = 2 * extentsPerQubit_[i] * extentsPerQubit_[i+1];
-	std::cout << "qubit " << i << ": (" << extentsPerQubit_[i] << "x" << extentsPerQubit_[i+1] << "x2) [";
+	out << "qubit " << i << ": (" << extentsPerQubit_[i] << "x" << extentsPerQubit_[i+1] << "x2) [";
 	for (size_t j = 0; j < actualSize; j++) {
-	    std::cout << qubitTensorHost_[i][j] << ", ";
+	    out << qubitTensorHost_[i][j] << ", ";
 	}
-	std::cout << "]" << std::endl;
+	out << "]" << std::endl;
     }
 }
 

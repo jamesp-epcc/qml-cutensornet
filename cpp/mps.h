@@ -4,6 +4,7 @@
 
 #include <complex>
 #include <vector>
+#include <iostream>
 
 #include <cuda_runtime.h>
 #include <cutensornet.h>
@@ -23,7 +24,7 @@ class MatrixProductState {
     
     char* loadFromString(char* str, bool conj=false);
 
-    void printTensors();
+    void printTensors(std::ostream& out);
 
     int getSerialisedSize();
     void serialise(std::vector<complex_t> &vec);

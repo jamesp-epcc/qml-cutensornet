@@ -17,15 +17,48 @@ pymat = np.load(sys.argv[1])
 
 # load the C++ matrix from text file
 f = open(sys.argv[2], 'r')
-file_contents = f.read()
+lines = f.readlines()
 f.close()
-l = ast.literal_eval(file_contents)
-cppmat = np.array(l)
+
+lines = lines[:-1]
+
+mat_h = len(lines)
+#mat_w = len(lines[0].split(','))
+mat_w = -1
+
+l = []
+for i, line in enumerate(lines):
+    line = line.strip()
+    while line[0] == '[':
+        line = line[1:]
+        line = line.strip()
+    while line[-1] == ',':
+        line = line[:-1]
+        line = line.strip()
+    while line[-1] == ']':
+        line = line[:-1]
+        line = line.strip()
+    bits = line.split(',')
+
+    if mat_w < 0:
+        mat_w = len(bits)
+        print("Reading matrix of size", mat_w, mat_h)
+        cppmat = np.zeros((mat_h, mat_w))
+
+    for j, val in enumerate(bits):
+        val = val.strip()
+        cppmat[i, j] = float(val)
+
 
 # check size matches
 if pymat.shape != cppmat.shape:
     print("Shape mismatch!", pymat.shape, cppmat.shape)
     sys.exit(1)
+
+for i in range(mat_w):
+    for j in range(mat_h):
+        if abs(cppmat[i, j] - pymat[i, j]) > 1e-6:
+            print("Mismatch at ", i, j, ": ", cppmat[i, j], pymat[i, j])
 
 # check contents match
 if np.allclose(pymat, cppmat):

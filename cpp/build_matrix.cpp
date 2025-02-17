@@ -269,11 +269,14 @@ int main(int argc, char* argv[])
     std::cout << "Allocating resources" << std::endl;
     
     // allocate storage for matrix
+    // FIXME: derive this properly
+    int matrix_w = num_mps_y * 4;
+    int matrix_h = num_mps_x * 4;
     complex_t* gpuMatrix;
-    HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, num_mps_x * num_mps_y * sizeof(complex_t)));
-    HANDLE_CUDA_ERROR(cudaMemset((void*)gpuMatrix, 0, num_mps_x * num_mps_y * sizeof(complex_t)));
-    complex_t* complexMatrix = new complex_t[num_mps_x * num_mps_y];
-    double* matrix = new double[num_mps_x * num_mps_y];
+    HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, matrix_w * matrix_h * sizeof(complex_t)));
+    HANDLE_CUDA_ERROR(cudaMemset((void*)gpuMatrix, 0, matrix_w * matrix_h * sizeof(complex_t)));
+    complex_t* complexMatrix = new complex_t[matrix_w * matrix_h];
+    double* matrix = new double[matrix_w * matrix_h];
 
     // instantiate a VdotCalculator for each thread
     std::vector<VdotCalculator*> vdcs;
@@ -294,6 +297,11 @@ int main(int argc, char* argv[])
     std::cout << "Computing matrix..." << std::endl;
     double t1 = getTime();
 
+    // create local log file
+    char logFilename[1000];
+    sprintf(logFilename, "/work/ic081/ic081/jamesp-ic081/fraud/mpilog%d.txt", rank);
+    std::ofstream logFile(logFilename);
+
     for (unsigned int it = 0; it < iterations; it++) {
 	// fetch MPS for processes that don't fit in round robin
 	for (unsigned int procSend = 0; procSend < (xChunks % yChunks); procSend++) {
@@ -313,7 +321,7 @@ int main(int argc, char* argv[])
 	}
 	
 #pragma omp parallel for
-	for (int i = 0; i < num_mps_y; i++) {
+	for (int i = 0; i < num_mps_x; i++) {
 	    int t = 0;
 #ifdef _OPENMP
 	    t = omp_get_thread_num();
@@ -322,11 +330,11 @@ int main(int argc, char* argv[])
 	    // buffers
 	    //HANDLE_CUDA_ERROR(cudaSetDevice(t % numGPUs));
 	    if (t == 0) std::cout << "Row " << i << std::endl;
-	    for (int j = 0; j < num_mps_x; j++) {
+	    for (int j = 0; j < num_mps_y; j++) {
 		// FIXME: handle symmetry optimisation
 		int x_index = i + entriesPerChunk * rank;
 		int y_index = j + entriesPerChunk * ((rank + it) % yChunks);
-		vdcs[t]->vdot(*mps_x[j], *mps_y[i], &gpuMatrix[(y_index * num_mps_y) + x_index]);
+		vdcs[t]->vdot(*mps_x[i], *mps_y[j], &gpuMatrix[(y_index * matrix_w) + x_index]);
 	    }
 	}
 
@@ -336,8 +344,12 @@ int main(int argc, char* argv[])
 	    for (int i = 0; i < mps_y.size(); i++) {
 		unsigned int recvfrom = (rank+1) % numProcsInRR;
 		unsigned int sendto = (rank-1) % numProcsInRR;
-		std::cout << "Rank " << rank << " sending to " << sendto << " and receiving from " << recvfrom << std::endl;
+		logFile << "Rank " << rank << " sending to " << sendto << " and receiving from " << recvfrom << std::endl;
+		logFile << "Before sending: " << std::endl;
+		mps_y[i]->printTensors(logFile);
 		sendRecvMPS(*mps_y[i], sendto, recvfrom);
+		logFile << std::endl << "After receiving: " << std::endl;
+		mps_y[i]->printTensors(logFile);
 	    }
 	}
     }
@@ -346,8 +358,8 @@ int main(int argc, char* argv[])
     std::cout << "Matrix computation took " << (t2 - t1) << "s" << std::endl;
 
     // copy and convert matrix
-    HANDLE_CUDA_ERROR(cudaMemcpy(complexMatrix, gpuMatrix, num_mps_x * num_mps_y * sizeof(complex_t), cudaMemcpyDeviceToHost));
-    for (int i = 0; i < (num_mps_x * num_mps_y); i++) {
+    HANDLE_CUDA_ERROR(cudaMemcpy(complexMatrix, gpuMatrix, matrix_w * matrix_h * sizeof(complex_t), cudaMemcpyDeviceToHost));
+    for (int i = 0; i < (matrix_w * matrix_h); i++) {
 	complex_t overlap = complexMatrix[i];
 	matrix[i] = (overlap * std::conj(overlap)).real();
     }
@@ -355,9 +367,9 @@ int main(int argc, char* argv[])
     std::cout << "Matrix copying and conversion took " << (t3 - t2) << "s" << std::endl;
 
     if (rank == 0) {
-	double* finalMatrix = new double[num_mps_x * num_mps_y];
+	double* finalMatrix = new double[matrix_w * matrix_h];
 	// reduce matrix across MPI processes
-	MPI_Reduce(matrix, finalMatrix, num_mps_x * num_mps_y,
+	MPI_Reduce(matrix, finalMatrix, matrix_w * matrix_h,
 		   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 
 	// write matrix to disk
@@ -371,14 +383,14 @@ int main(int argc, char* argv[])
 	}
 	of << std::setprecision(20);
 	of << "[ ";
-	for (int i = 0; i < num_mps_y; i++) {
+	for (int i = 0; i < matrix_w; i++) {
 	    of << "[ ";
-	    for (int j = 0; j < num_mps_x; j++) {
-		of << finalMatrix[(j * num_mps_y) + i];
-		if (j < (num_mps_x - 1)) of << ", ";
+	    for (int j = 0; j < matrix_h; j++) {
+		of << finalMatrix[(j * matrix_w) + i];
+		if (j < (matrix_h - 1)) of << ", ";
 	    }
 	    of << " ]";
-	    if (i < (num_mps_y - 1)) of << ",";
+	    if (i < (matrix_w - 1)) of << ",";
 	    of << std::endl;
 	}
 	of << " ]" << std::endl;
@@ -388,7 +400,7 @@ int main(int argc, char* argv[])
     }
     else {
 	// reduce matrix across MPI processes
-	MPI_Reduce(matrix, nullptr, num_mps_x * num_mps_y,
+	MPI_Reduce(matrix, nullptr, matrix_w * matrix_h,
 		   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     }
 
@@ -407,6 +419,8 @@ int main(int argc, char* argv[])
     for (int i = 0; i < vdcs.size(); i++) {
 	delete vdcs[i];
     }
+
+    logFile.close();
 
     MPI_Finalize();
     return 0;
