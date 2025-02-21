@@ -1,7 +1,3 @@
-// FIXME: I think matrix dimensions are completely wrong for MPI runs.
-// num_mps_x and num_mps_y correspond to the number of items in the input files,
-// which is the ones the local process has, but they're used for the dimensions of
-// the entire matrix, which should be global!
 #include "mps.h"
 #include "vdot_calculator.h"
 
@@ -13,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 
 #include <sys/time.h>
 
@@ -190,7 +187,7 @@ int main(int argc, char* argv[])
 	return 1;
     }
 
-    // extract number of MPSs and number of qubits from input files
+    // extract number of local MPSs and number of qubits from input files
     int num_mps_x, num_qubit_x;
     char *mps_x_ptr = readInt(mps_x_str, num_mps_x);
     if (!mps_x_ptr) {
@@ -267,11 +264,20 @@ int main(int argc, char* argv[])
     delete[] mps_y_str;
 
     std::cout << "Allocating resources" << std::endl;
+
+    // determine global size in X and Y by summing all local sizes
+    int local_size[2], total_size[2];
+    local_size[0] = num_mps_x;
+    local_size[1] = num_mps_y;
+    if (MPI_Allreduce(local_size, total_size, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD) != MPI_SUCCESS) {
+	std::cerr << "MPI reduction error" << std::endl;
+	MPI_Finalize();
+	return 1;
+    }
     
     // allocate storage for matrix
-    // FIXME: derive this properly
-    int matrix_w = num_mps_y * 4;
-    int matrix_h = num_mps_x * 4;
+    int matrix_w = total_size[0];
+    int matrix_h = total_size[1];
     complex_t* gpuMatrix;
     HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, matrix_w * matrix_h * sizeof(complex_t)));
     HANDLE_CUDA_ERROR(cudaMemset((void*)gpuMatrix, 0, matrix_w * matrix_h * sizeof(complex_t)));
@@ -286,13 +292,23 @@ int main(int argc, char* argv[])
     }
 
     // work out sizes and counts
-    unsigned int entriesPerChunk = num_mps_x;
+    unsigned int entriesPerChunk = unsigned(std::ceil(double(total_size[0]) / double(numProcs)));
     unsigned int xChunks = numProcs;
-    unsigned int yChunks = xChunks; // FIXME: handle the case where these are not equal!
+    unsigned int yChunks = unsigned(std::ceil(double(total_size[1]) / double(entriesPerChunk)));
     unsigned int numProcsInRR = numProcs - (xChunks % yChunks);
 
     unsigned int iterations = yChunks; // FIXME: handle symmetry optimisation
-    
+
+    // print out dimensions on process 0
+    if (rank == 0) {
+	std::cout << "num_mps_x=" << num_mps_x << std::endl;
+	std::cout << "num_mps_y=" << num_mps_y << std::endl;
+	std::cout << "matrix_w=" << matrix_w << std::endl;
+	std::cout << "matrix_h=" << matrix_h << std::endl;
+	std::cout << "entriesPerChunk=" << entriesPerChunk << std::endl;
+	std::cout << "yChunks=" << yChunks << std::endl;
+    }
+
     // compute matrix
     std::cout << "Computing matrix..." << std::endl;
     double t1 = getTime();
