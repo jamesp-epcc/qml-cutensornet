@@ -169,6 +169,9 @@ int main(int argc, char* argv[])
     char* datadir = argv[1];
     char* trainOrTest = argv[2];
     char filenameBuffer[500];
+
+    bool symmetryOptimisation = false;
+    if (!strcmp(argv[2], "train")) symmetryOptimisation = true;
     
     // read the input files
     sprintf(filenameBuffer, "%s/mps_x_%s_%d.txt", datadir, trainOrTest, rank);
@@ -189,6 +192,7 @@ int main(int argc, char* argv[])
 
     // extract number of local MPSs and number of qubits from input files
     int num_mps_x, num_qubit_x;
+    int total_size[2];
     char *mps_x_ptr = readInt(mps_x_str, num_mps_x);
     if (!mps_x_ptr) {
 	std::cerr << "Error parsing header of MPS X input file" << std::endl;
@@ -196,6 +200,12 @@ int main(int argc, char* argv[])
 	return 1;
     }
     mps_x_ptr = readInt(mps_x_ptr, num_qubit_x);
+    if (!mps_x_ptr) {
+	std::cerr << "Error parsing header of MPS X input file" << std::endl;
+	MPI_Finalize();
+	return 1;
+    }
+    mps_x_ptr = readInt(mps_x_ptr, total_size[0]);
     if (!mps_x_ptr) {
 	std::cerr << "Error parsing header of MPS X input file" << std::endl;
 	MPI_Finalize();
@@ -210,6 +220,12 @@ int main(int argc, char* argv[])
 	return 1;
     }
     mps_y_ptr = readInt(mps_y_ptr, num_qubit_y);
+    if (!mps_y_ptr) {
+	std::cerr << "Error parsing header of MPS Y input file" << std::endl;
+	MPI_Finalize();
+	return 1;
+    }
+    mps_y_ptr = readInt(mps_y_ptr, total_size[1]);
     if (!mps_y_ptr) {
 	std::cerr << "Error parsing header of MPS Y input file" << std::endl;
 	MPI_Finalize();
@@ -266,18 +282,31 @@ int main(int argc, char* argv[])
     std::cout << "Allocating resources" << std::endl;
 
     // determine global size in X and Y by summing all local sizes
-    int local_size[2], total_size[2];
+    /*int local_size[2], total_size[2];
     local_size[0] = num_mps_x;
     local_size[1] = num_mps_y;
     if (MPI_Allreduce(local_size, total_size, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD) != MPI_SUCCESS) {
 	std::cerr << "MPI reduction error" << std::endl;
 	MPI_Finalize();
 	return 1;
-    }
+	}*/
     
+    // work out sizes and counts
+    unsigned int entriesPerChunk = unsigned(std::ceil(double(total_size[0]) / double(numProcs)));
+    unsigned int xChunks = numProcs;
+    unsigned int yChunks = unsigned(std::ceil(double(total_size[1]) / double(entriesPerChunk)));
+    //unsigned int yChunks = 1; // FIXME: for testing only!
+    unsigned int numProcsInRR = numProcs - (xChunks % yChunks);
+
+    unsigned int iterations = yChunks;
+    if (symmetryOptimisation) {
+	// skip some iterations
+	iterations = (xChunks / 2) + 1;
+    }
+
     // allocate storage for matrix
-    int matrix_w = total_size[0];
-    int matrix_h = total_size[1];
+    int matrix_w = xChunks * num_mps_x;
+    int matrix_h = yChunks * num_mps_y;
     complex_t* gpuMatrix;
     HANDLE_CUDA_ERROR(cudaMalloc((void**)&gpuMatrix, matrix_w * matrix_h * sizeof(complex_t)));
     HANDLE_CUDA_ERROR(cudaMemset((void*)gpuMatrix, 0, matrix_w * matrix_h * sizeof(complex_t)));
@@ -290,14 +319,6 @@ int main(int argc, char* argv[])
 	//HANDLE_CUDA_ERROR(cudaSetDevice(i % numGPUs));
 	vdcs.push_back(new VdotCalculator(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2));
     }
-
-    // work out sizes and counts
-    unsigned int entriesPerChunk = unsigned(std::ceil(double(total_size[0]) / double(numProcs)));
-    unsigned int xChunks = numProcs;
-    unsigned int yChunks = unsigned(std::ceil(double(total_size[1]) / double(entriesPerChunk)));
-    unsigned int numProcsInRR = numProcs - (xChunks % yChunks);
-
-    unsigned int iterations = yChunks; // FIXME: handle symmetry optimisation
 
     // print out dimensions on process 0
     if (rank == 0) {
@@ -375,6 +396,23 @@ int main(int argc, char* argv[])
 
     // copy and convert matrix
     HANDLE_CUDA_ERROR(cudaMemcpy(complexMatrix, gpuMatrix, matrix_w * matrix_h * sizeof(complex_t), cudaMemcpyDeviceToHost));
+    if (symmetryOptimisation) {
+	// if doing symmetry optimisation, fill in missing values now
+	unsigned int symmetryItStart = 1;
+	unsigned int symmetryItEnd = iterations;
+	if ((xChunks & 1) == 0) symmetryItEnd--;
+	for (unsigned int it = symmetryItStart; it < symmetryItEnd; it++) {
+#pragma omp parallel for
+	    for (int i = 0; i < num_mps_x; i++) {
+		for (int j = 0; j < num_mps_y; j++) {
+		    int x_index = i + entriesPerChunk * rank;
+		    int y_index = j + entriesPerChunk * ((rank + it) % yChunks);
+		    complexMatrix[(x_index * matrix_w) + y_index] = complexMatrix[(y_index * matrix_w) + x_index];
+		}
+	    }
+	}
+    }
+#pragma omp parallel for
     for (int i = 0; i < (matrix_w * matrix_h); i++) {
 	complex_t overlap = complexMatrix[i];
 	matrix[i] = (overlap * std::conj(overlap)).real();
@@ -399,14 +437,14 @@ int main(int argc, char* argv[])
 	}
 	of << std::setprecision(20);
 	of << "[ ";
-	for (int i = 0; i < matrix_w; i++) {
+	for (int i = 0; i < matrix_h; i++) {
 	    of << "[ ";
-	    for (int j = 0; j < matrix_h; j++) {
-		of << finalMatrix[(j * matrix_w) + i];
-		if (j < (matrix_h - 1)) of << ", ";
+	    for (int j = 0; j < matrix_w; j++) {
+		of << finalMatrix[(i * matrix_w) + j];
+		if (j < (matrix_w - 1)) of << ", ";
 	    }
 	    of << " ]";
-	    if (i < (matrix_w - 1)) of << ",";
+	    if (i < (matrix_h - 1)) of << ",";
 	    of << std::endl;
 	}
 	of << " ]" << std::endl;

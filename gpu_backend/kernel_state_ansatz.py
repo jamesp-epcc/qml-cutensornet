@@ -104,10 +104,11 @@ class KernelStateAnsatz:
 
 
 # saves a list of matrix product states to a file, in text format
-def save_mps_array(filename, mps_array):
+def save_mps_array(filename, mps_array, global_size):
     f = open(filename, 'w')
-    # write a header giving the number of MPSs and number of tensors per MPS
-    f.write(f'{len(mps_array)} {len(mps_array[0].tensors)}\n')
+    # write a header giving the number of MPSs, number of tensors per MPS
+    # and global size
+    f.write(f'{len(mps_array)} {len(mps_array[0].tensors)} {global_size}\n')
     for mps in mps_array:
         if mps is not None:
             for t in mps.tensors:
@@ -338,14 +339,14 @@ def build_kernel_matrix(mpi_comm, ansatz: KernelStateAnsatz, X, Y=None, info_fil
         sys.stdout.flush()
         tiling_start_time = MPI.Wtime()
 
+    len_Y = len(Y) if Y is not None else len(X)
     if save_mps:
         # Save all MPSs to files and return without computing matrix
-        save_mps_array(f'mps_x_{name}_{rank}.txt', mps_x_chunk)
-        save_mps_array(f'mps_y_{name}_{rank}.txt', mps_y_chunk)
+        save_mps_array(f'mps_x_{name}_{rank}.txt', mps_x_chunk, len(X))
+        save_mps_array(f'mps_y_{name}_{rank}.txt', mps_y_chunk, len_Y)
         return None
         
     # Allocate space for kernel matrix
-    len_Y = len(Y) if Y is not None else len(X)
     kernel_mat = np.zeros(shape=(len_Y, len(X)))
 
     vdot_time = []

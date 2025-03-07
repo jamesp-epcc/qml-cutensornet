@@ -17,6 +17,11 @@ pymat = np.load(sys.argv[1])
 
 # load the C++ matrix from text file
 f = open(sys.argv[2], 'r')
+#file_contents = f.read()
+#f.close()
+#l = ast.literal_eval(file_contents)
+#cppmat = np.array(l)
+
 lines = f.readlines()
 f.close()
 
@@ -57,9 +62,9 @@ if pymat.shape != cppmat.shape:
 
 for i in range(mat_w):
     for j in range(mat_h):
-        if abs(cppmat[i, j] - pymat[i, j]) > 1e-6:
-            print("Mismatch at ", i, j, ": ", cppmat[i, j], pymat[i, j])
-
+        if abs(cppmat[j, i] - pymat[j, i]) > 1e-6:
+            print("Mismatch at ", i, j, ": ", cppmat[j, i], pymat[j, i])
+    
 # check contents match
 if np.allclose(pymat, cppmat):
     print("Matrices match within tolerance")
