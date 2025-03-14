@@ -6,6 +6,9 @@
 #include <cuda_runtime.h>
 #include <cutensornet.h>
 
+// This class computes dot products between matrix product states.
+// It includes all the data structures and workspaces required. Multiple
+// VdotCalculators can exist and can run on the GPU simultaneously.
 class VdotCalculator {
  public:
     VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t typeCompute,

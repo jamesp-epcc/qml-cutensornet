@@ -96,6 +96,7 @@ static bool isNone(char* str)
     return true;
 }
 
+// sends one MatrixProductState to another MPI process
 static int sendMPS(MatrixProductState& mps, unsigned int dest)
 {
     // FIXME: could allocate one of these per thread instead of reallocating locally
@@ -106,6 +107,7 @@ static int sendMPS(MatrixProductState& mps, unsigned int dest)
 		    MPI_COMM_WORLD);
 }
 
+// receives one MatrixProductState from another MPI process
 static int receiveMPS(MatrixProductState& mps, unsigned int source)
 {
     MPI_Status status;
@@ -121,6 +123,7 @@ static int receiveMPS(MatrixProductState& mps, unsigned int source)
     return err;
 }
 
+// sends and receives MatrixProductStates simultaneously in round robin
 static int sendRecvMPS(MatrixProductState& mps, unsigned int dest, unsigned int source)
 {
     MPI_Status status;
@@ -190,7 +193,8 @@ int main(int argc, char* argv[])
 	return 1;
     }
 
-    // extract number of local MPSs and number of qubits from input files
+    // extract number of local MPSs, number of qubits and number of global MPSs
+    // from input files
     int num_mps_x, num_qubit_x;
     int total_size[2];
     char *mps_x_ptr = readInt(mps_x_str, num_mps_x);
@@ -281,16 +285,6 @@ int main(int argc, char* argv[])
 
     std::cout << "Allocating resources" << std::endl;
 
-    // determine global size in X and Y by summing all local sizes
-    /*int local_size[2], total_size[2];
-    local_size[0] = num_mps_x;
-    local_size[1] = num_mps_y;
-    if (MPI_Allreduce(local_size, total_size, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD) != MPI_SUCCESS) {
-	std::cerr << "MPI reduction error" << std::endl;
-	MPI_Finalize();
-	return 1;
-	}*/
-    
     // work out sizes and counts
     unsigned int entriesPerChunk = unsigned(std::ceil(double(total_size[0]) / double(numProcs)));
     unsigned int xChunks = numProcs;
@@ -316,7 +310,6 @@ int main(int argc, char* argv[])
     // instantiate a VdotCalculator for each thread
     std::vector<VdotCalculator*> vdcs;
     for (int i = 0; i < numThreads; i++) {
-	//HANDLE_CUDA_ERROR(cudaSetDevice(i % numGPUs));
 	vdcs.push_back(new VdotCalculator(CUDA_C_64F, CUTENSORNET_COMPUTE_64F, num_qubit_x, 2));
     }
 
@@ -335,9 +328,9 @@ int main(int argc, char* argv[])
     double t1 = getTime();
 
     // create local log file
-    char logFilename[1000];
-    sprintf(logFilename, "/work/ic081/ic081/jamesp-ic081/fraud/mpilog%d.txt", rank);
-    std::ofstream logFile(logFilename);
+    //char logFilename[1000];
+    //sprintf(logFilename, "/work/ic081/ic081/jamesp-ic081/fraud/mpilog%d.txt", rank);
+    //std::ofstream logFile(logFilename);
 
     for (unsigned int it = 0; it < iterations; it++) {
 	// fetch MPS for processes that don't fit in round robin
@@ -363,12 +356,8 @@ int main(int argc, char* argv[])
 #ifdef _OPENMP
 	    t = omp_get_thread_num();
 #endif
-	    // FIXME: before we can use multiple devices, we need multiple output
-	    // buffers
-	    //HANDLE_CUDA_ERROR(cudaSetDevice(t % numGPUs));
-	    if (t == 0) std::cout << "Row " << i << std::endl;
+	    //if (t == 0) std::cout << "Row " << i << std::endl;
 	    for (int j = 0; j < num_mps_y; j++) {
-		// FIXME: handle symmetry optimisation
 		int x_index = i + entriesPerChunk * rank;
 		int y_index = j + entriesPerChunk * ((rank + it) % yChunks);
 		vdcs[t]->vdot(*mps_x[i], *mps_y[j], &gpuMatrix[(y_index * matrix_w) + x_index]);
@@ -381,12 +370,12 @@ int main(int argc, char* argv[])
 	    for (int i = 0; i < mps_y.size(); i++) {
 		unsigned int recvfrom = (rank+1) % numProcsInRR;
 		unsigned int sendto = (rank-1) % numProcsInRR;
-		logFile << "Rank " << rank << " sending to " << sendto << " and receiving from " << recvfrom << std::endl;
-		logFile << "Before sending: " << std::endl;
-		mps_y[i]->printTensors(logFile);
+		//logFile << "Rank " << rank << " sending to " << sendto << " and receiving from " << recvfrom << std::endl;
+		//logFile << "Before sending: " << std::endl;
+		//mps_y[i]->printTensors(logFile);
 		sendRecvMPS(*mps_y[i], sendto, recvfrom);
-		logFile << std::endl << "After receiving: " << std::endl;
-		mps_y[i]->printTensors(logFile);
+		//logFile << std::endl << "After receiving: " << std::endl;
+		//mps_y[i]->printTensors(logFile);
 	    }
 	}
     }
@@ -474,7 +463,7 @@ int main(int argc, char* argv[])
 	delete vdcs[i];
     }
 
-    logFile.close();
+    //logFile.close();
 
     MPI_Finalize();
     return 0;

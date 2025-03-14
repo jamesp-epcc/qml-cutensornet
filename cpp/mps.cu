@@ -29,16 +29,21 @@ MatrixProductState::MatrixProductState(int32_t numQubits, int64_t maxVirtualExte
 	virtualModes_.push_back(nextMode_++);
 	if (i != numQubits_) physModes_.push_back(nextMode_++);
     }
-    int64_t untruncatedMaxExtent = (int64_t)std::pow(physExtent_, numQubits_/2);
-    maxVirtualExtent_ = maxVirtualExtent == 0 ? untruncatedMaxExtent : std::min(maxVirtualExtent, untruncatedMaxExtent);
+    // this logic breaks down for larger numbers of qubits, so just use the
+    // max virtual extent passed in instead
+    //int64_t untruncatedMaxExtent = (int64_t)std::pow(physExtent_, numQubits_/2);
+    //maxVirtualExtent_ = maxVirtualExtent == 0 ? untruncatedMaxExtent : std::min(maxVirtualExtent, untruncatedMaxExtent);
+    maxVirtualExtent_ = maxVirtualExtent;
 
     // work out maximum number of elements for each tensor
     size_t maxMaxTensorElements = 0;
     int64_t maxLeftExtent = 1;
     for (int i = 0; i < numQubits_; i++) {
-	int64_t maxRightExtent = std::min(std::min((int64_t)std::pow(physExtent_, i+1),
+	// again this logic fails for large numbers of qubits
+	/*int64_t maxRightExtent = std::min(std::min((int64_t)std::pow(physExtent_, i+1),
 						   (int64_t)std::pow(physExtent_, numQubits_-i-1)),
-					  maxVirtualExtent_);
+						   maxVirtualExtent_);*/
+	int64_t maxRightExtent = maxVirtualExtent;
 	size_t maxHere = physExtent_ * maxLeftExtent * maxRightExtent;
 	maxTensorElements_.push_back(maxHere);
 	if (maxHere > maxMaxTensorElements) maxMaxTensorElements = maxHere;
@@ -61,6 +66,7 @@ MatrixProductState::MatrixProductState(int32_t numQubits, int64_t maxVirtualExte
 
 MatrixProductState::~MatrixProductState()
 {
+    // free all host and device tensors
     for (int i = 0; i < numQubits_; i++) {
 	delete[] qubitTensorHost_[i];
 	cudaFree(qubitTensor_[i]);
@@ -162,6 +168,7 @@ char* MatrixProductState::loadFromString(char* str, bool conj)
     return str + p;
 }
 
+// log the tensors to an output stream for debugging
 void MatrixProductState::printTensors(std::ostream& out)
 {
     for (int i = 0; i < numQubits_; i++) {
@@ -177,6 +184,8 @@ void MatrixProductState::printTensors(std::ostream& out)
     }
 }
 
+// returns the number of double complex values required to hold the serialised
+// version of this state
 int MatrixProductState::getSerialisedSize()
 {
     int arraySize = numQubits_ + 1; // additional space for holding extents

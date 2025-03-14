@@ -36,8 +36,8 @@ VdotCalculator::VdotCalculator(cudaDataType_t typeData, cutensornetComputeType_t
     
     // create workspace and set its memory
     HANDLE_ERROR(cutensornetCreateWorkspaceDescriptor(handle_, &workDesc_));
-    // FIXME: for now, hard code this to be similar size to in test program
-    // might want to compute it dynamically in future
+    // this has been big enough in all my tests, but is not guaranteed to ALWAYS
+    // be big enough. Should maybe compute the required size on the fly
     workspaceSize_ = 20 * 1024 * 1024;
     HANDLE_CUDA_ERROR(cudaMalloc(&workspace_, workspaceSize_));
     HANDLE_ERROR(cutensornetWorkspaceSetMemory(handle_,
@@ -114,8 +114,6 @@ VdotCalculator::~VdotCalculator()
 
 void VdotCalculator::vdot(MatrixProductState& mps1, MatrixProductState& mps2, complex_t* result)
 {
-    // FIXME: promote a lot of the locals here to class members so they don't
-    // have to be allocated each time
     // sanity check
     if ((mps1.numQubits_ != numQubits_) ||
 	(mps2.numQubits_ != numQubits_) ||
